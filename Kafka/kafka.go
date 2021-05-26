@@ -7,8 +7,8 @@ import (
 
 var (
 	client sarama.SyncProducer
-	// for save memory
-	MsgChan chan *sarama.ProducerMessage
+	// for save memory,use *
+	msgChan chan *sarama.ProducerMessage
 )
 
 // Init global kafka
@@ -24,7 +24,7 @@ func Init(address []string, ChanSize int64) (err error) {
 		logrus.Error("Kafka producer closed,err:", err)
 		return
 	}
-	MsgChan = make(chan *sarama.ProducerMessage, ChanSize)
+	msgChan = make(chan *sarama.ProducerMessage, ChanSize)
 	// kafka receive msg
 	go sendMsg()
 	return
@@ -34,7 +34,7 @@ func Init(address []string, ChanSize int64) (err error) {
 func sendMsg() {
 	for {
 		select {
-		case msg := <-MsgChan:
+		case msg := <-msgChan:
 			pid, offset, err := client.SendMessage(msg)
 			if err != nil {
 				logrus.Warning("send msg to kafka failed,err:", err)
@@ -43,4 +43,9 @@ func sendMsg() {
 			logrus.Infof("send msg to kafka success! pid:%v offset:%v", pid, offset)
 		}
 	}
+}
+
+// Reduce exposure to variables
+func ToMsgChan(msg *sarama.ProducerMessage) {
+	msgChan <- msg
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/Shopify/sarama"
 	"github.com/go-ini/ini"
 	"github.com/sirupsen/logrus"
+	"strings"
 	"time"
 )
 
@@ -35,13 +36,18 @@ func run() (err error) {
 			time.Sleep(time.Second)
 			continue
 		}
+		// if line is null,stop sending the text to kafka
+		// for windows: trim \r
+		if len(strings.Trim(line.Text, "\r")) == 0 {
+			continue
+		}
 		// change into asynchronous by channel
 		// pack a line up into msg(type) for kafka,to channel
 		msg := &sarama.ProducerMessage{}
 		msg.Topic = "web_log"
 		msg.Value = sarama.StringEncoder(line.Text)
 		// to a channel
-		Kafka.MsgChan <- msg
+		Kafka.ToMsgChan(msg)
 	}
 
 }
