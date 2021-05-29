@@ -2,54 +2,36 @@ package main
 
 import (
 	"Log_Collection/Kafka"
+	"Log_Collection/etcd"
 	"Log_Collection/tailfile"
 	"fmt"
-	"github.com/Shopify/sarama"
 	"github.com/go-ini/ini"
 	"github.com/sirupsen/logrus"
-	"strings"
-	"time"
 )
 
 type config struct {
 	KafkaConfig   `ini:"kafka"`
 	CollectConfig `ini:"collect"`
+	EtcdConfig    `ini:"etcd"`
 }
 
 type KafkaConfig struct {
-	Address  string `ini:"address"`
-	Topic    string `ini:"topic"`
-	ChanSize int64  `ini:"chan_size"`
+	Address string `ini:"address"`
+	//Topic    string `ini:"topic"`
+	ChanSize int64 `ini:"chan_size"`
 }
 
 type CollectConfig struct {
 	LogFilePath string `ini:"logfile_path"`
 }
 
-// tailObj -> logs -> Client -> kafka
-func run() (err error) {
-	// 1. for{read data}
-	for {
-		line, ok := <-tailfile.TailObj.Lines
-		if !ok {
-			logrus.Warn("tail file close reopen,filename:%s\n", tailfile.TailObj.Filename)
-			time.Sleep(time.Second)
-			continue
-		}
-		// if line is null,stop sending the text to kafka
-		// for windows: trim \r
-		if len(strings.Trim(line.Text, "\r")) == 0 {
-			continue
-		}
-		// change into asynchronous by channel
-		// pack a line up into msg(type) for kafka,to channel
-		msg := &sarama.ProducerMessage{}
-		msg.Topic = "web_log"
-		msg.Value = sarama.StringEncoder(line.Text)
-		// to a channel
-		Kafka.ToMsgChan(msg)
-	}
+type EtcdConfig struct {
+	Address    string `ini:"address"`
+	CollectKey string `ini:"collect_key"`
+}
 
+func run() {
+	select {}
 }
 
 func main() {
@@ -57,28 +39,39 @@ func main() {
 	var configObj = new(config)
 	err := ini.MapTo(configObj, "./conf/config.ini")
 	if err != nil {
-		logrus.Error("load config failed,err:%v", err)
+		logrus.Errorf("load config failed,err:%v", err)
 		return
 	}
 	fmt.Printf("%#v\n", configObj)
 	// 2. init: connect kafka
-	err = Kafka.Init([]string{configObj.Address}, configObj.KafkaConfig.ChanSize)
+	err = Kafka.Init([]string{configObj.KafkaConfig.Address}, configObj.KafkaConfig.ChanSize)
 	if err != nil {
-		logrus.Error("init kafka failed,err:%v", err)
+		logrus.Errorf("init kafka failed,err:%v", err)
 		return
 	}
-	logrus.Info("init kafka success!")
-	// 3. init tail
-	err = tailfile.Init(configObj.CollectConfig.LogFilePath)
+	logrus.Infof("init kafka success!")
+
+	// 3. etcd
+	// 3.1: init etcd
+	err = etcd.Init([]string{configObj.EtcdConfig.Address})
 	if err != nil {
-		logrus.Error("init tail failed,err:%v", err)
+		logrus.Errorf("init etcd failed,err:%v", err)
 		return
 	}
-	logrus.Info("init tailfile success!")
-	// 4. send logs to kafka by tail
-	err = run()
+	// 3.2: get config from etcd
+	allconf, err := etcd.GetConf(configObj.EtcdConfig.CollectKey)
 	if err != nil {
-		logrus.Error("send logs to kafka failed,err:%v", err)
+		logrus.Errorf("get config from etcd failed,err:%v", err)
+	}
+	fmt.Println(allconf)
+	// 3.3: launch a goroutine to watch etcd
+	go etcd.WatchConf(configObj.EtcdConfig.CollectKey)
+	// 4. init tail
+	err = tailfile.Init(allconf) // send configs which come from etcd to tail Init
+	if err != nil {
+		logrus.Errorf("init tail failed,err:%v", err)
 		return
 	}
+	logrus.Infof("init tailfile success!")
+	run()
 }
