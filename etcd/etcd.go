@@ -45,7 +45,7 @@ func GetConf(key string) (collectEntryList []common.CollectEntry, err error) {
 	}
 	res := resp.Kvs[0]
 	fmt.Println(res.Value)
-	err = json.Unmarshal(res.Value, collectEntryList)
+	err = json.Unmarshal(res.Value, &collectEntryList)
 	if err != nil {
 		logrus.Errorf("json umnarsharl failed,err:%v", err)
 		return
@@ -55,18 +55,27 @@ func GetConf(key string) (collectEntryList []common.CollectEntry, err error) {
 
 // watch etcd
 func WatchConf(key string) {
-	watchChan := client.Watch(context.Background(), key)
-	var newConfig []common.CollectEntry
-	for wresp := range watchChan {
-		logrus.Infof("get now config from etcd!")
-		for _, evt := range wresp.Events {
-			fmt.Printf("type:%s,key:%s,value:%s", evt.Type, evt.Kv.Key, evt.Kv.Value)
-			err := json.Unmarshal(evt.Kv.Value, &newConfig)
-			if err != nil {
-				logrus.Errorf("json unmarshal new config failed,err:%v", err)
+	for {
+		watchChan := client.Watch(context.Background(), key)
+		for wresp := range watchChan {
+			logrus.Infof("get now config from etcd!")
+			for _, evt := range wresp.Events {
+				fmt.Printf("type:%s,key:%s,value:%s", evt.Type, evt.Kv.Key, evt.Kv.Value)
+				var newConfig []common.CollectEntry
+				if evt.Type == clientv3.EventTypeDelete {
+					logrus.Warning("Delete the ket in etcd")
+					tailfile.SendNewConfig(newConfig)
+					continue
+				}
+				err := json.Unmarshal(evt.Kv.Value, &newConfig)
+				if err != nil {
+					logrus.Errorf("json unmarshal new config failed,err:%v", err)
+					continue
+				}
+				// communicate with tailfile by a channel;send new config
+				tailfile.SendNewConfig(newConfig)
 			}
 		}
-		// communicate with tailfile by a channel;send new config
-		tailfile.SendNewConfig(newConfig)
 	}
+
 }
