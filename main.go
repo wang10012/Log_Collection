@@ -2,6 +2,7 @@ package main
 
 import (
 	"Log_Collection/Kafka"
+	"Log_Collection/common"
 	"Log_Collection/etcd"
 	"Log_Collection/tailfile"
 	"fmt"
@@ -35,9 +36,15 @@ func run() {
 }
 
 func main() {
+	// 0. get ip for getting configs from etcd
+	ip, err := common.GetOutboundIP()
+	if err != nil {
+		logrus.Errorf("get ip faild,err:%v", err)
+		return
+	}
 	// 1. load config
 	var configObj = new(config)
-	err := ini.MapTo(configObj, "./conf/config.ini")
+	err = ini.MapTo(configObj, "./conf/config.ini")
 	if err != nil {
 		logrus.Errorf("load config failed,err:%v", err)
 		return
@@ -59,13 +66,15 @@ func main() {
 		return
 	}
 	// 3.2: get config from etcd
-	allconf, err := etcd.GetConf(configObj.EtcdConfig.CollectKey)
+	// replace %s with ip
+	collectkey := fmt.Sprintf(configObj.EtcdConfig.CollectKey, ip)
+	allconf, err := etcd.GetConf(collectkey)
 	if err != nil {
 		logrus.Errorf("get config from etcd failed,err:%v", err)
 	}
 	fmt.Println(allconf)
 	// 3.3: launch a goroutine to watch etcd
-	go etcd.WatchConf(configObj.EtcdConfig.CollectKey)
+	go etcd.WatchConf(collectkey)
 	// 4. init tail
 	err = tailfile.Init(allconf) // send configs which come from etcd to tail Init
 	if err != nil {
